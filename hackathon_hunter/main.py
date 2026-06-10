@@ -97,6 +97,7 @@ def build_notification_manager(db_path: str) -> Optional[NotificationManager]:
                     smtp_host=settings.EMAIL_SMTP_HOST,
                     smtp_port=settings.EMAIL_SMTP_PORT,
                     subject_prefix=settings.EMAIL_SUBJECT_PREFIX,
+                    db_path=db_path,
                 )
             )
             logger.info(
@@ -139,6 +140,10 @@ def build_service(db_path: Optional[str] = None) -> ScraperService:
     # ------------------------------------------------------------------
     repo = SQLiteHackathonRepository(db_path=resolved_db_path)
     repo.initialize()
+
+    from hackathon_hunter.repositories.registration_analysis_repository import RegistrationAnalysisRepository
+    analysis_repo = RegistrationAnalysisRepository(db_path=resolved_db_path)
+    analysis_repo.initialize()
 
     # ------------------------------------------------------------------
     # Scrapers — Phase 1 (active)

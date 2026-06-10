@@ -59,6 +59,7 @@ class EmailNotifier(BaseNotifier):
         smtp_host: str = "smtp.gmail.com",
         smtp_port: int = 587,
         subject_prefix: str = "[Hackathon Hunter]",
+        db_path: str | None = None,
     ) -> None:
         self._sender = sender.strip()
         self._password = password.replace(" ", "")  # App Passwords may have spaces
@@ -66,6 +67,7 @@ class EmailNotifier(BaseNotifier):
         self._smtp_host = smtp_host
         self._smtp_port = smtp_port
         self._subject_prefix = subject_prefix
+        self._db_path = db_path
 
     # ------------------------------------------------------------------
     # BaseNotifier interface
@@ -124,9 +126,21 @@ class EmailNotifier(BaseNotifier):
 
     def _build_message(self, hackathons: list[Hackathon]) -> MIMEMultipart:
         """Construct a MIMEMultipart('alternative') message with HTML + plain text."""
+        analyses = {}
+        if self._db_path:
+            try:
+                from hackathon_hunter.repositories.registration_analysis_repository import RegistrationAnalysisRepository
+                repo = RegistrationAnalysisRepository(db_path=self._db_path)
+                for h in hackathons:
+                    analysis = repo.get_analysis(h.url)
+                    if analysis:
+                        analyses[h.url] = analysis
+            except Exception as exc:
+                logger.warning("Failed to fetch analyses from database: %s", exc)
+
         subject = build_subject(hackathons, self._subject_prefix)
-        html_body = render_html(hackathons)
-        plain_body = render_plain(hackathons)
+        html_body = render_html(hackathons, analyses)
+        plain_body = render_plain(hackathons, analyses)
 
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject

@@ -41,6 +41,7 @@ class PageAnalyzer:
                 f"PROFILE: {cat_counts[FieldCategory.PROFILE]}",
                 f"QUESTION: {cat_counts[FieldCategory.QUESTION]}",
                 f"TEAM: {cat_counts[FieldCategory.TEAM]}",
+                f"CONSENT: {cat_counts[FieldCategory.CONSENT]}",
                 f"UNKNOWN: {cat_counts[FieldCategory.UNKNOWN]}",
                 "",
                 "Would Fill:"
@@ -62,6 +63,7 @@ class PageAnalyzer:
                 f"PROFILE: {cat_counts[FieldCategory.PROFILE]}",
                 f"QUESTION: {cat_counts[FieldCategory.QUESTION]}",
                 f"TEAM: {cat_counts[FieldCategory.TEAM]}",
+                f"CONSENT: {cat_counts[FieldCategory.CONSENT]}",
                 f"UNKNOWN: {cat_counts[FieldCategory.UNKNOWN]}",
                 "",
                 f"Filled: {len(filled_fields)}",
@@ -98,6 +100,7 @@ class PageAnalyzer:
                 "profile_fields": cat_counts[FieldCategory.PROFILE.value],
                 "question_fields": cat_counts[FieldCategory.QUESTION.value],
                 "team_fields": cat_counts[FieldCategory.TEAM.value],
+                "consent_fields": cat_counts[FieldCategory.CONSENT.value],
                 "unknown_fields": cat_counts[FieldCategory.UNKNOWN.value],
                 "filled": len(filled_fields),
                 "skipped": len(skipped_fields),

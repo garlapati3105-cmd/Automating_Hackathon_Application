@@ -12,7 +12,14 @@ class FieldCategory(str, Enum):
     PROFILE = "PROFILE"
     QUESTION = "QUESTION"
     TEAM = "TEAM"
+    CONSENT = "CONSENT"
     UNKNOWN = "UNKNOWN"
+
+
+class QuestionComplexity(str, Enum):
+    SIMPLE = "SIMPLE"
+    MODERATE = "MODERATE"
+    COMPLEX = "COMPLEX"
 
 
 class FieldMetadata:
@@ -37,10 +44,11 @@ class FieldMetadata:
         self.required = required
         self.category = category
         self.locator = locator
+        self.question_complexity = QuestionComplexity.SIMPLE
 
     def to_dict(self) -> dict[str, Any]:
         """Convert metadata to dictionary format for JSON export."""
-        return {
+        res = {
             "identifier": self.identifier,
             "type": self.field_type,
             "label": self.label_text,
@@ -48,6 +56,9 @@ class FieldMetadata:
             "required": self.required,
             "category": self.category.value,
         }
+        if self.category == FieldCategory.QUESTION:
+            res["question_complexity"] = self.question_complexity.value
+        return res
 
 
 class FormDetector:
@@ -168,7 +179,15 @@ class FormDetector:
         """
         combined = f"{label} {placeholder} {identifier}".lower()
 
-        # 1. Check QUESTION category first (essay/long form questions)
+        # 1. Check CONSENT category (e.g. agreement checkboxes/fields)
+        consent_words = [
+            "agree", "consent", "terms", "policy", "privacy", "rules",
+            "code of conduct", "opt-in", "opt in", "authorize", "acknowledg"
+        ]
+        if any(c in combined for c in consent_words):
+            return FieldCategory.CONSENT
+
+        # 2. Check QUESTION category first (essay/long form questions)
         question_words = [
             "why", "describe", "explain", "interest", "project", 
             "technologies", "motivation", "tell us", "about yourself",
@@ -180,12 +199,12 @@ class FormDetector:
             if not any(p in combined for p in profile_override_words):
                 return FieldCategory.QUESTION
 
-        # 2. Check TEAM category
+        # 3. Check TEAM category
         team_words = ["team", "group", "co-founder", "partner", "member"]
         if any(t in combined for t in team_words):
             return FieldCategory.TEAM
 
-        # 3. Check PROFILE category
+        # 4. Check PROFILE category
         profile_words = [
             "name", "email", "mail", "phone", "contact", "mobile", "number", "tel",
             "college", "university", "school", "institution", "degree", "course",

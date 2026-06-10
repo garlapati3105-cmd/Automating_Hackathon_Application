@@ -199,6 +199,16 @@ class ScraperService:
                     result.inserted += 1
                     new_hackathons.append(hackathon)
                     self._print_new_hackathon(hackathon)
+
+                    # Insert placeholder in registration_analysis table
+                    try:
+                        db_path = getattr(self._repo, "_db_path", "data/hackathons.db")
+                        from hackathon_hunter.repositories.registration_analysis_repository import RegistrationAnalysisRepository
+                        analysis_repo = RegistrationAnalysisRepository(db_path=db_path)
+                        analysis_repo.initialize()
+                        analysis_repo.save_placeholder(hackathon.url, hackathon.name)
+                    except Exception as exc:
+                        logger.warning("Failed to save analysis placeholder: %s", exc)
                 else:
                     result.skipped += 1
                     logger.debug(

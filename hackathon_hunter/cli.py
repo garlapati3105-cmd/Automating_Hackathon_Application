@@ -106,6 +106,108 @@ def main() -> None:
             print("Unknown profile subcommand. Did you mean 'validate'?", file=sys.stderr)
             sys.exit(1)
 
+    # Intercept analyze subcommand
+    if len(sys.argv) > 1 and sys.argv[1] == "analyze":
+        if len(sys.argv) < 3:
+            print("Usage: python -m hackathon_hunter analyze <url>", file=sys.stderr)
+            sys.exit(1)
+
+        url = sys.argv[2]
+
+        try:
+            # Reconfigure stdout/stderr for Unicode
+            try:
+                if hasattr(sys.stdout, "reconfigure"):
+                    sys.stdout.reconfigure(encoding="utf-8")
+                if hasattr(sys.stderr, "reconfigure"):
+                    sys.stderr.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
+
+            from hackathon_hunter.automation.playwright_manager import PlaywrightManager
+            from hackathon_hunter.automation.form_detector import FormDetector
+            from hackathon_hunter.automation.readiness_analyzer import ReadinessAnalyzer
+            from hackathon_hunter.automation.registration_report import RegistrationReport
+            from hackathon_hunter.repositories.registration_analysis_repository import RegistrationAnalysisRepository
+
+            # Initialize repository and get DB path
+            db_path = settings.DATABASE_PATH
+            repo = RegistrationAnalysisRepository(db_path=db_path)
+            repo.initialize()
+
+            try:
+                with PlaywrightManager(headless=True) as pm:
+                    page = pm.open_url(url)
+                    page_title = page.title() or "Unknown Hackathon"
+
+                    detector = FormDetector()
+                    fields = detector.detect_fields(page)
+
+                    analyzer = ReadinessAnalyzer()
+                    analysis = analyzer.analyze(fields)
+
+                    # Build stats and list of questions with their complexity
+                    field_stats = {
+                        "profile": analysis["profile_count"],
+                        "question": analysis["question_count"],
+                        "team": analysis["team_count"],
+                        "consent": analysis["consent_count"],
+                        "unknown": analysis["unknown_count"]
+                    }
+
+                    from hackathon_hunter.automation.form_detector import FieldCategory
+                    questions_list = []
+                    for f in fields:
+                        if f.category == FieldCategory.QUESTION:
+                            questions_list.append({
+                                "label": f.label_text or f.identifier,
+                                "complexity": f.question_complexity.value
+                            })
+
+                    report = RegistrationReport(
+                        hackathon_name=page_title,
+                        registration_url=url,
+                        field_statistics=field_stats,
+                        automation_score=analysis["automation_score"],
+                        requires_human_review=analysis["requires_human_review"],
+                        analysis_status="ANALYZED",
+                        questions=questions_list
+                    )
+
+                    repo.save_analysis(
+                        url=url,
+                        hackathon_name=page_title,
+                        profile_count=analysis["profile_count"],
+                        question_count=analysis["question_count"],
+                        team_count=analysis["team_count"],
+                        consent_count=analysis["consent_count"],
+                        unknown_count=analysis["unknown_count"],
+                        score=analysis["automation_score"],
+                        requires_human_review=analysis["requires_human_review"],
+                        classification=report.classification,
+                        recommendation=report.recommendation,
+                        approval_status="PENDING"
+                    )
+
+                    print(f"Automation Score: {analysis['automation_score']}")
+                    print(f"Classification: {report.classification}")
+                    print(f"Recommendation: {report.recommendation}")
+                    print("Analysis Status: ANALYZED")
+                    sys.exit(0)
+
+            except Exception as exc:
+                # Save FAILED status to the repository
+                try:
+                    repo.save_failed_analysis(url=url, hackathon_name="Unknown Hackathon")
+                except Exception as db_exc:
+                    print(f"Error saving failed status: {db_exc}", file=sys.stderr)
+                print(f"Error during analysis: {exc}", file=sys.stderr)
+                sys.exit(1)
+
+        except Exception as exc:
+            print(f"Error setting up analysis: {exc}", file=sys.stderr)
+            sys.exit(1)
+
     # Intercept autofill subcommand
     if len(sys.argv) > 1 and sys.argv[1] == "autofill":
         if len(sys.argv) < 3:

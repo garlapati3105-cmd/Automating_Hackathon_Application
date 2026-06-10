@@ -20,11 +20,12 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hackathon_hunter.notifications.filters import is_hyderabad_hackathon
 
 if TYPE_CHECKING:
+    from typing import Any
     from hackathon_hunter.models.hackathon import Hackathon
 
 
@@ -49,7 +50,7 @@ def build_subject(hackathons: list[Hackathon], prefix: str = "[Hackathon Hunter]
 # Plain-text fallback
 # ---------------------------------------------------------------------------
 
-def render_plain(hackathons: list[Hackathon]) -> str:
+def render_plain(hackathons: list[Hackathon], analyses: dict[str, dict] = None) -> str:
     """Render a plain-text summary suitable as a MIME fallback."""
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = [
@@ -74,6 +75,26 @@ def render_plain(hackathons: list[Hackathon]) -> str:
         if h.deadline:
             lines.append(f"   Deadline : {h.deadline}")
         lines.append(f"   Register : {h.url}")
+        
+        # Include readiness report if available
+        if analyses and h.url in analyses:
+            analysis = analyses[h.url]
+            status = analysis.get("analysis_status", "NOT_ANALYZED")
+            if status == "ANALYZED":
+                lines.append(f"   Automation Score: {analysis.get('automation_score', 0)}")
+                lines.append(f"   Classification  : {analysis.get('classification', 'LOW')}")
+                lines.append(f"   Recommendation  : {analysis.get('automation_recommendation', 'MANUAL_ONLY')}")
+                lines.append("   Fields:")
+                lines.append(f"     Profile  : {analysis.get('profile_field_count', 0)}")
+                lines.append(f"     Questions: {analysis.get('question_field_count', 0)}")
+                lines.append(f"     Team     : {analysis.get('team_field_count', 0)}")
+                lines.append(f"     Consent  : {analysis.get('consent_field_count', 0)}")
+                lines.append(f"     Unknown  : {analysis.get('unknown_field_count', 0)}")
+            else:
+                lines.append(f"   Analysis Status: {status}")
+        else:
+            lines.append("   Analysis Status: NOT_ANALYZED")
+
         lines.append("")
 
     lines += [
@@ -111,7 +132,7 @@ def _url_hash(url: str) -> str:
     return hashlib.sha1(url.encode()).hexdigest()[:10]
 
 
-def _render_hackathon_card(h: Hackathon, index: int) -> str:
+def _render_hackathon_card(h: Hackathon, index: int, analysis: dict[str, Any] | None = None) -> str:
     """Render a single hackathon card as an HTML table row block."""
     badge_bg, badge_fg = _platform_badge_style(h.platform)
     url_hash = _url_hash(h.url)
@@ -208,6 +229,7 @@ def _render_hackathon_card(h: Hackathon, index: int) -> str:
               </td>
             </tr>
           </table>
+          {_get_readiness_html(analysis)}
         </td>
       </tr>
       <!-- Card footer: action buttons -->
@@ -250,7 +272,7 @@ def _render_hackathon_card(h: Hackathon, index: int) -> str:
     </table>"""
 
 
-def render_html(hackathons: list[Hackathon]) -> str:
+def render_html(hackathons: list[Hackathon], analyses: dict[str, dict] = None) -> str:
     """
     Render a full, richly-styled HTML email for a batch of hackathons.
 
@@ -274,7 +296,10 @@ def render_html(hackathons: list[Hackathon]) -> str:
     )
 
     # Render all hackathon cards
-    cards_html = "\n".join(_render_hackathon_card(h, i) for i, h in enumerate(hackathons, 1))
+    cards_html = "\n".join(
+        _render_hackathon_card(h, i, analyses.get(h.url) if analyses else None)
+        for i, h in enumerate(hackathons, 1)
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -359,3 +384,59 @@ def render_html(hackathons: list[Hackathon]) -> str:
 
 </body>
 </html>"""
+
+
+def _get_readiness_html(analysis: dict[str, Any] | None) -> str:
+    if not analysis:
+        return """
+        <div style="margin-top: 14px; padding: 8px 12px; background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; font-size: 12px; color: #64748B;">
+          🤖 Automation Status: <strong>NOT_ANALYZED</strong>
+        </div>
+        """
+    status = analysis.get("analysis_status", "NOT_ANALYZED")
+    if status == "ANALYZED":
+        score = analysis.get("automation_score", 0)
+        cls = analysis.get("classification", "LOW")
+        rec = analysis.get("automation_recommendation", "MANUAL_ONLY")
+        rec_color = "#16A34A" if rec == "AUTO_FILL_ONLY" else "#D97706" if rec == "AUTO_FILL_AND_REVIEW" else "#DC2626"
+        return f"""
+        <div style="margin-top: 14px; padding: 12px; background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px;">
+          <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 700; color: #1E293B;">🤖 Automation Readiness Report</p>
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size: 12px; color: #475569;">
+            <tr>
+              <td style="padding: 2px 0; font-weight: 600;">Automation Score</td>
+              <td style="padding: 2px 0; text-align: right; font-weight: 700; color: #2563EB;">{score}% ({cls})</td>
+            </tr>
+            <tr>
+              <td style="padding: 2px 0;">Profile Fields</td>
+              <td style="padding: 2px 0; text-align: right;">{analysis.get("profile_field_count", 0)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 2px 0;">Question Fields</td>
+              <td style="padding: 2px 0; text-align: right;">{analysis.get("question_field_count", 0)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 2px 0;">Team Fields</td>
+              <td style="padding: 2px 0; text-align: right;">{analysis.get("team_field_count", 0)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 2px 0;">Consent Fields</td>
+              <td style="padding: 2px 0; text-align: right;">{analysis.get("consent_field_count", 0)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 2px 0;">Unknown Fields</td>
+              <td style="padding: 2px 0; text-align: right;">{analysis.get("unknown_field_count", 0)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0 0 0; font-weight: 600; border-top: 1px dashed #E2E8F0;">Recommended Action</td>
+              <td style="padding: 6px 0 0 0; text-align: right; font-weight: 700; color: {rec_color}; border-top: 1px dashed #E2E8F0;">{rec}</td>
+            </tr>
+          </table>
+        </div>
+        """
+    else:
+        return f"""
+        <div style="margin-top: 14px; padding: 8px 12px; background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; font-size: 12px; color: #64748B;">
+          🤖 Automation Status: <strong style="color: #DC2626;">{status}</strong>
+        </div>
+        """
