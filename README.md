@@ -14,6 +14,7 @@ A production-ready Python 3.12 project that monitors hackathon listing sites, ex
 - **Clean architecture** — repository pattern + service layer
 - **Extensible** — add a new scraper with a single file + one line registration
 - **Readiness & Approval Engine** (Phase 6): Standalone registration form analysis via `python -m hackathon_hunter analyze <url>`, scoring deductions for non-profile fields, automation recommendations, state tracking (`NOT_ANALYZED`, `ANALYZED`, `FAILED`), and unique approval tokens.
+- **Approval Workflow System** (Phase 7): Secure token-based approval links integrated into email templates. Prevention of bot/crawler auto-triggering via a GET confirmation web form and POST action endpoints. Dynamic token expiration tracking and audit logs in an approval history database.
 
 ---
 
@@ -41,7 +42,19 @@ python -m hackathon_hunter --scraper openhackathons
 python -m hackathon_hunter analyze <url>
 ```
 
-### 5. Override settings at runtime
+### 5. Run the FastAPI Approval Server (Phase 7)
+```bash
+uvicorn hackathon_hunter.approval.approval_routes:app --reload --port 8000
+```
+
+### 6. Filter Approvals via CLI (Phase 7)
+```bash
+python -m hackathon_hunter approvals pending
+python -m hackathon_hunter approvals approved
+python -m hackathon_hunter approvals rejected
+```
+
+### 7. Override settings at runtime
 ```bash
 python -m hackathon_hunter --log-level DEBUG --delay 3 --db-path /custom/path/db.sqlite
 ```
@@ -76,6 +89,11 @@ hackathon_hunter/
 │   │   ├── readiness_analyzer.py
 │   │   ├── registration_report.py
 │   │   └── approval_engine.py
+│   ├── approval/
+│   │   ├── token_manager.py    # UUID4 approval tokens
+│   │   ├── approval_models.py  # Pydantic JSON/form responses
+│   │   ├── approval_service.py # state transition engine
+│   │   └── approval_routes.py  # FastAPI app endpoints & views
 │   └── scrapers/
 │       ├── base.py          # AbstractScraper
 │       ├── devfolio.py
@@ -89,7 +107,8 @@ hackathon_hunter/
 │   ├── test_models.py
 │   ├── test_repository.py
 │   ├── test_scraper_service.py
-│   └── test_readiness.py
+│   ├── test_readiness.py
+│   └── test_approval_workflow.py
 ├── requirements.txt
 ├── pyproject.toml
 └── README.md
@@ -115,7 +134,7 @@ CREATE TABLE IF NOT EXISTS hackathons (
 );
 ```
 
-### Registration Analysis Table (Phase 6)
+### Registration Analysis Table (Phase 7)
 ```sql
 CREATE TABLE IF NOT EXISTS registration_analysis (
     id                     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -133,8 +152,23 @@ CREATE TABLE IF NOT EXISTS registration_analysis (
     approval_status        TEXT NOT NULL,
     analysis_status        TEXT NOT NULL,
     approval_token         TEXT NOT NULL,
+    token_expires_at       TIMESTAMP,
+    approved_at            TIMESTAMP,
+    rejected_at            TIMESTAMP,
+    approval_notes         TEXT,
     created_at             TIMESTAMP NOT NULL,
     updated_at             TIMESTAMP NOT NULL
+);
+```
+
+### Approval History Table (Phase 7)
+```sql
+CREATE TABLE IF NOT EXISTS approval_history (
+    id         INTEGER   PRIMARY KEY AUTOINCREMENT,
+    token      TEXT      NOT NULL,
+    action     TEXT      NOT NULL,
+    timestamp  TIMESTAMP NOT NULL,
+    notes      TEXT
 );
 ```
 
@@ -152,6 +186,7 @@ All values can be overridden via environment variables:
 | `SCRAPER_DELAY_SECONDS` | `2` | `HH_SCRAPER_DELAY` |
 | `LOG_LEVEL` | `INFO` | `HH_LOG_LEVEL` |
 | `LOG_FILE` | `logs/hackathon.log` | `HH_LOG_FILE` |
+| `APPROVAL_BASE_URL` | *(None)* | `HH_APPROVAL_BASE_URL` |
 
 ---
 
