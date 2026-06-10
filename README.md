@@ -13,6 +13,7 @@ A production-ready Python 3.12 project that monitors hackathon listing sites, ex
 - **Dual logging** — console (colorized) + rotating file (`logs/hackathon.log`)
 - **Clean architecture** — repository pattern + service layer
 - **Extensible** — add a new scraper with a single file + one line registration
+- **Readiness & Approval Engine** (Phase 6): Standalone registration form analysis via `python -m hackathon_hunter analyze <url>`, scoring deductions for non-profile fields, automation recommendations, state tracking (`NOT_ANALYZED`, `ANALYZED`, `FAILED`), and unique approval tokens.
 
 ---
 
@@ -35,7 +36,12 @@ python -m hackathon_hunter --scraper unstop
 python -m hackathon_hunter --scraper openhackathons
 ```
 
-### 4. Override settings at runtime
+### 4. Analyze a Registration Form (Phase 6)
+```bash
+python -m hackathon_hunter analyze <url>
+```
+
+### 5. Override settings at runtime
 ```bash
 python -m hackathon_hunter --log-level DEBUG --delay 3 --db-path /custom/path/db.sqlite
 ```
@@ -57,9 +63,19 @@ hackathon_hunter/
 │   │   └── hackathon.py     # Pydantic domain model
 │   ├── repositories/
 │   │   ├── base.py          # AbstractHackathonRepository
-│   │   └── sqlite_repository.py
+│   │   ├── sqlite_repository.py
+│   │   └── registration_analysis_repository.py
 │   ├── services/
 │   │   └── scraper_service.py
+│   ├── automation/
+│   │   ├── playwright_manager.py
+│   │   ├── form_detector.py
+│   │   ├── form_filler.py
+│   │   ├── field_mapper.py
+│   │   ├── page_analyzer.py
+│   │   ├── readiness_analyzer.py
+│   │   ├── registration_report.py
+│   │   └── approval_engine.py
 │   └── scrapers/
 │       ├── base.py          # AbstractScraper
 │       ├── devfolio.py
@@ -72,15 +88,18 @@ hackathon_hunter/
 ├── tests/
 │   ├── test_models.py
 │   ├── test_repository.py
-│   └── test_scraper_service.py
+│   ├── test_scraper_service.py
+│   └── test_readiness.py
 ├── requirements.txt
-└── pyproject.toml
+├── pyproject.toml
+└── README.md
 ```
 
 ---
 
 ## Database Schema
 
+### Hackathons Table
 ```sql
 CREATE TABLE IF NOT EXISTS hackathons (
     id         INTEGER   PRIMARY KEY AUTOINCREMENT,
@@ -93,6 +112,29 @@ CREATE TABLE IF NOT EXISTS hackathons (
     status     TEXT      DEFAULT 'NEW',
     first_seen TIMESTAMP,
     raw_json   TEXT
+);
+```
+
+### Registration Analysis Table (Phase 6)
+```sql
+CREATE TABLE IF NOT EXISTS registration_analysis (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    url                    TEXT NOT NULL UNIQUE,
+    hackathon_name         TEXT,
+    profile_field_count    INTEGER NOT NULL,
+    question_field_count   INTEGER NOT NULL,
+    team_field_count       INTEGER NOT NULL,
+    consent_field_count    INTEGER NOT NULL,
+    unknown_field_count    INTEGER NOT NULL,
+    automation_score       INTEGER NOT NULL,
+    requires_human_review  INTEGER NOT NULL,
+    classification         TEXT NOT NULL,
+    automation_recommendation TEXT NOT NULL,
+    approval_status        TEXT NOT NULL,
+    analysis_status        TEXT NOT NULL,
+    approval_token         TEXT NOT NULL,
+    created_at             TIMESTAMP NOT NULL,
+    updated_at             TIMESTAMP NOT NULL
 );
 ```
 
