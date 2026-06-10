@@ -76,6 +76,36 @@ Examples:
 
 def main() -> None:
     """Parse arguments, configure logging, and run the scraper service."""
+    # Intercept profile subcommands
+    if len(sys.argv) > 1 and sys.argv[1] == "profile":
+        if len(sys.argv) > 2 and sys.argv[2] == "validate":
+            try:
+                if hasattr(sys.stdout, "reconfigure"):
+                    sys.stdout.reconfigure(encoding="utf-8")
+                if hasattr(sys.stderr, "reconfigure"):
+                    sys.stderr.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
+            from hackathon_hunter.services.profile_service import ProfileService
+            service = ProfileService()
+            try:
+                profile = service.load_profile()
+                service.validate_profile(profile)
+                try:
+                    print("✅ Profile is valid!")
+                except UnicodeEncodeError:
+                    print("Profile is valid!")
+                sys.exit(0)
+            except Exception as exc:
+                try:
+                    print(f"❌ Profile validation failed:\n{exc}", file=sys.stderr)
+                except UnicodeEncodeError:
+                    print(f"[ERROR] Profile validation failed:\n{exc}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print("Unknown profile subcommand. Did you mean 'validate'?", file=sys.stderr)
+            sys.exit(1)
+
     parser = _build_parser()
     args = parser.parse_args()
 
