@@ -1,0 +1,244 @@
+name: Hackathon Hunter Monitor
+
+on:
+  schedule:
+    # Runs every 30 minutes
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      debug_mode:
+        description: 'Enable DEBUG log level'
+        required: false
+        default: 'false'
+
+# Ensure only one instance of this workflow runs at a time.
+# If a new run is triggered while one is in progress, the new run queues
+# rather than cancelling the in-progress run (cancel-in-progress: false).
+concurrency:
+  group: hackathon-hunter-monitor
+  cancel-in-progress: false
+
+permissions:
+  actions: read    # Required for gh run download
+  contents: read
+
+jobs:
+  monitor:
+    name: Monitor Hackathons
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      HH_EMAIL_ENABLED: ${{ secrets.HH_EMAIL_ENABLED }}
+      HH_EMAIL_SENDER: ${{ secrets.HH_EMAIL_SENDER }}
+      HH_EMAIL_PASSWORD: ${{ secrets.HH_EMAIL_PASSWORD }}
+      HH_EMAIL_RECIPIENTS: ${{ secrets.HH_EMAIL_RECIPIENTS }}
+      HH_LOCATION_FILTER: india
+      HH_INCLUDE_ONLINE: 'true'
+      HH_PRIORITY_CITY: hyderabad
+      HH_LOG_LEVEL: ${{ github.event.inputs.debug_mode == 'true' && 'DEBUG' || 'INFO' }}
+
+    steps:
+      # ──────────────────────────────────────────────────────────
+      # 1. Checkout
+      # ──────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ──────────────────────────────────────────────────────────
+      # 2. Python setup
+      # ──────────────────────────────────────────────────────────
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ──────────────────────────────────────────────────────────
+      # 3. Restore database artifact from last successful run
+      # ──────────────────────────────────────────────────────────
+      - name: Restore database from last successful run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p data
+
+          # Find the most recent successful run of THIS workflow
+          RUN_ID=$(gh run list \
+            --workflow "Hackathon Hunter Monitor" \
+            --status success \
+            --limit 1 \
+            --json databaseId \
+            --jq '.[0].databaseId' 2>/dev/null || echo "")
+
+          if [ -n "$RUN_ID" ]; then
+            echo "Previous successful run found: $RUN_ID — downloading database artifact..."
+            if gh run download "$RUN_ID" --name hackathons-db --dir data; then
+              echo "✅ Database artifact downloaded successfully."
+            else
+              echo "⚠️  Artifact download failed (may have expired). Starting with a fresh database."
+            fi
+          else
+            echo "ℹ️  No previous successful run found. Starting with a fresh database."
+          fi
+
+          # ── Integrity check and corruption recovery ──────────
+          if [ -f data/hackathons.db ]; then
+            echo "Running SQLite integrity check..."
+            if command -v sqlite3 >/dev/null 2>&1; then
+              INTEGRITY=$(sqlite3 data/hackathons.db "PRAGMA integrity_check;" 2>/dev/null || echo "error")
+              if [ "$INTEGRITY" = "ok" ]; then
+                echo "✅ Database integrity check passed."
+              else
+                echo "❌ Database is corrupted (check result: '$INTEGRITY'). Removing to recover."
+                rm -f data/hackathons.db
+              fi
+            else
+              echo "ℹ️  sqlite3 not available on runner — skipping integrity check."
+            fi
+          fi
+
+          # Report final DB state
+          if [ -f data/hackathons.db ]; then
+            echo "DB_STATUS=restored" >> "$GITHUB_ENV"
+          else
+            echo "DB_STATUS=fresh" >> "$GITHUB_ENV"
+          fi
+
+      # ──────────────────────────────────────────────────────────
+      # 4. Run unit tests (gate — failure blocks scraping)
+      # ──────────────────────────────────────────────────────────
+      - name: Run unit tests
+        run: pytest tests/ -v --tb=short
+        # If tests fail, the workflow fails here and the scraper does NOT run.
+
+      # ──────────────────────────────────────────────────────────
+      # 5. Run scraper with retry logic
+      # ──────────────────────────────────────────────────────────
+      - name: Run Hackathon Hunter (with retry)
+        id: scraper
+        run: |
+          MAX_ATTEMPTS=3
+          ATTEMPT=0
+          EXIT_CODE=1
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo ""
+            echo "━━━ Scraper attempt $ATTEMPT / $MAX_ATTEMPTS ━━━"
+            python -m hackathon_hunter
+            EXIT_CODE=$?
+
+            if [ $EXIT_CODE -eq 0 ]; then
+              echo "✅ Scraper completed successfully on attempt $ATTEMPT."
+              break
+            else
+              echo "⚠️  Scraper exited with code $EXIT_CODE on attempt $ATTEMPT."
+              if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+                echo "Waiting 10 seconds before retry..."
+                sleep 10
+              fi
+            fi
+          done
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "❌ Scraper failed after $MAX_ATTEMPTS attempts."
+          fi
+
+          exit $EXIT_CODE
+
+      # ──────────────────────────────────────────────────────────
+      # 6. On failure: dump logs for diagnostics
+      # ──────────────────────────────────────────────────────────
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          echo "──────────────── hackathon.log ────────────────"
+          if [ -f logs/hackathon.log ]; then
+            tail -n 100 logs/hackathon.log
+          else
+            echo "(no log file found)"
+          fi
+          echo "────────────────────────────────────────────────"
+
+      # ──────────────────────────────────────────────────────────
+      # 7. Write GitHub Actions Job Summary
+      # ──────────────────────────────────────────────────────────
+      - name: Write job summary
+        if: always()
+        run: |
+          python - <<'PYEOF'
+          import os, sqlite3, sys
+          from pathlib import Path
+          from datetime import datetime, timezone
+
+          summary_file = os.environ.get("GITHUB_STEP_SUMMARY", "")
+          db_path = Path("data/hackathons.db")
+          db_status = os.environ.get("DB_STATUS", "unknown")
+          run_url = f"https://github.com/{os.environ.get('GITHUB_REPOSITORY','')}/actions/runs/{os.environ.get('GITHUB_RUN_ID','')}"
+          now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+          lines = [
+              "## 🤖 Hackathon Hunter — Run Summary",
+              f"**Run at:** {now}  ",
+              f"**Database:** {db_status}  ",
+              "",
+          ]
+
+          if db_path.exists():
+              try:
+                  conn = sqlite3.connect(str(db_path))
+                  row = conn.execute("SELECT COUNT(*) FROM hackathons").fetchone()
+                  total = row[0] if row else 0
+                  platforms = conn.execute(
+                      "SELECT platform, COUNT(*) FROM hackathons GROUP BY platform ORDER BY platform"
+                  ).fetchall()
+                  conn.close()
+
+                  lines += [
+                      f"**Total hackathons stored:** {total}",
+                      "",
+                      "### Platform Breakdown",
+                      "| Platform | Count |",
+                      "| :--- | ---: |",
+                  ]
+                  for plat, cnt in platforms:
+                      lines.append(f"| {plat} | {cnt} |")
+              except Exception as e:
+                  lines.append(f"⚠️ Could not read database: {e}")
+          else:
+              lines.append("⚠️ No database file found after run.")
+
+          lines += [
+              "",
+              "### Notification Settings",
+              f"| Setting | Value |",
+              f"| :--- | :--- |",
+              f"| Email Enabled | `{os.environ.get('HH_EMAIL_ENABLED', 'false')}` |",
+              f"| Location Filter | `{os.environ.get('HH_LOCATION_FILTER', 'india')}` |",
+              f"| Priority City | `{os.environ.get('HH_PRIORITY_CITY', 'hyderabad')}` |",
+              f"| Include Online | `{os.environ.get('HH_INCLUDE_ONLINE', 'true')}` |",
+          ]
+
+          output = "\n".join(lines)
+          if summary_file:
+              with open(summary_file, "a", encoding="utf-8") as f:
+                  f.write(output + "\n")
+          else:
+              print(output)
+          PYEOF
+
+      # ──────────────────────────────────────────────────────────
+      # 8. Upload updated database artifact
+      # ──────────────────────────────────────────────────────────
+      - name: Upload database artifact
+        uses: actions/upload-artifact@v4
+        if: always()  # Upload even on failure to preserve any partial state
+        with:
+          name: hackathons-db
+          path: data/hackathons.db
+          retention-days: 30
+          if-no-files-found: warn
