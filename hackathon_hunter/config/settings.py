@@ -73,3 +73,8 @@ LOCATION_FILTER: str = os.getenv("HH_LOCATION_FILTER", "india").strip().lower()
 INCLUDE_ONLINE: bool = os.getenv("HH_INCLUDE_ONLINE", "true").strip().lower() == "true"
 PRIORITY_CITY: str = os.getenv("HH_PRIORITY_CITY", "hyderabad").strip().lower()
 
+# ---------------------------------------------------------------------------
+# Playwright Browser Automation
+# ---------------------------------------------------------------------------
+PAGE_STABILIZATION_DELAY_MS: int = int(os.getenv("HH_PAGE_STABILIZATION_DELAY_MS", "3000"))
+

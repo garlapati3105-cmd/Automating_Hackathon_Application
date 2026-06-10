@@ -1,0 +1,128 @@
+{
+    "url": "file:///c:/Users/hp/Downloads/Automating_Hackathon_Applications/test_form.html",
+    "timestamp": "2026-06-10T06:24:38.016943+00:00",
+    "summary": {
+        "total_fields": 14,
+        "profile_fields": 11,
+        "question_fields": 2,
+        "team_fields": 1,
+        "unknown_fields": 0,
+        "filled": 10,
+        "skipped": 4,
+        "execution_time_seconds": 4.26
+    },
+    "fields": [
+        {
+            "identifier": "name",
+            "type": "text",
+            "label": "Full Name",
+            "placeholder": "Name",
+            "required": true,
+            "category": "PROFILE"
+        },
+        {
+            "identifier": "email",
+            "type": "email",
+            "label": "Email Address",
+            "placeholder": "",
+            "required": true,
+            "category": "PROFILE"
+        },
+        {
+            "identifier": "phone",
+            "type": "tel",
+            "label": "Phone Number",
+            "placeholder": "",
+            "required": false,
+            "category": "PROFILE"
+        },
+        {
+            "identifier": "college",
+            "type": "text",
+            "label": "College/University",
+            "placeholder": "",
+            "required": false,
+            "category": "PROFILE"
+        },
+        {
+            "identifier": "degree",
+            "type": "text",
+            "label": "Degree",
+            "placeholder": "",
+            "required": false,
+            "category": "PROFILE"
+        },
+        {
+            "identifier": "branch",
+            "type": "text",
+            "label": "Branch of Study",
+            "placeholder": "",
+            "required": false,
+            "category": "PROFILE"
+        },
+        {
+            "identifier": "grad",
+            "type": "number",
+            "label": "Graduation Year",
+            "placeholder": "",
+            "required": false,
+            "category": "PROFILE"
+        },
+        {
+            "identifier": "github",
+            "type": "url",
+            "label": "GitHub Link",
+            "placeholder": "",
+            "required": false,
+            "category": "PROFILE"
+        },
+        {
+            "identifier": "linkedin",
+            "type": "url",
+            "label": "LinkedIn URL",
+            "placeholder": "",
+            "required": false,
+            "category": "PROFILE"
+        },
+        {
+            "identifier": "portfolio",
+            "type": "url",
+            "label": "Portfolio",
+            "placeholder": "",
+            "required": false,
+            "category": "PROFILE"
+        },
+        {
+            "identifier": "resume",
+            "type": "file",
+            "label": "Resume PDF",
+            "placeholder": "",
+            "required": false,
+            "category": "PROFILE"
+        },
+        {
+            "identifier": "team_name",
+            "type": "text",
+            "label": "Team Name",
+            "placeholder": "",
+            "required": false,
+            "category": "TEAM"
+        },
+        {
+            "identifier": "q1",
+            "type": "textarea",
+            "label": "Why do you want to join this hackathon?",
+            "placeholder": "",
+            "required": false,
+            "category": "QUESTION"
+        },
+        {
+            "identifier": "q2",
+            "type": "textarea",
+            "label": "Describe your project idea in detail",
+            "placeholder": "",
+            "required": false,
+            "category": "QUESTION"
+        }
+    ]
+}

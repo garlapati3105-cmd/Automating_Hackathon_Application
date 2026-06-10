@@ -1,0 +1,19 @@
+{
+  "team_name": "Antigravities",
+  "team_size": 3,
+  "members": [
+    {
+      "full_name": "Garlapati saikiran",
+      "email": "garlapati3105@gmail.com",
+      "phone": "9959113105",
+      "college": "Aurora University",
+      "degree": "Btech",
+      "branch": "Computer Science and Engineering",
+      "graduation_year": 2029,
+      "github": "https://github.com/garlapati3105-cmd",
+      "linkedin": "https://www.linkedin.com/in/sai-kiran-garlapati-795710397/",
+      "portfolio": null,
+      "resume_path": "profile/resume.pdf"
+    }
+  ]
+}

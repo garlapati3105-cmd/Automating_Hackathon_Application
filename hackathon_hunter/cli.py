@@ -106,6 +106,91 @@ def main() -> None:
             print("Unknown profile subcommand. Did you mean 'validate'?", file=sys.stderr)
             sys.exit(1)
 
+    # Intercept autofill subcommand
+    if len(sys.argv) > 1 and sys.argv[1] == "autofill":
+        if len(sys.argv) < 3:
+            print("Usage: python -m hackathon_hunter autofill <url> [--dry-run]", file=sys.stderr)
+            sys.exit(1)
+
+        url = sys.argv[2]
+        dry_run = "--dry-run" in sys.argv
+
+        import time
+        from hackathon_hunter.services.profile_service import ProfileService
+        from hackathon_hunter.automation import PlaywrightManager, FormDetector, FieldMapper, FormFiller, PageAnalyzer
+
+        if not dry_run:
+            print("Opening page...")
+
+        start_time = time.time()
+
+        try:
+            profile_service = ProfileService()
+            profile = profile_service.load_profile()
+        except Exception as exc:
+            try:
+                print(f"❌ Error loading profile: {exc}", file=sys.stderr)
+            except UnicodeEncodeError:
+                print(f"[ERROR] Error loading profile: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        try:
+            # Reconfigure stdout/stderr for Unicode
+            try:
+                if hasattr(sys.stdout, "reconfigure"):
+                    sys.stdout.reconfigure(encoding="utf-8")
+                if hasattr(sys.stderr, "reconfigure"):
+                    sys.stderr.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
+
+            # Execute browser automation
+            with PlaywrightManager(headless=True) as pm:
+                page = pm.open_url(url)
+
+                detector = FormDetector()
+                fields = detector.detect_fields(page)
+
+                mapper = FieldMapper()
+                filler = FormFiller(mapper)
+
+                filled, skipped = filler.fill_form(fields, profile, dry_run=dry_run)
+
+                execution_time = time.time() - start_time
+
+                analyzer = PageAnalyzer()
+                report = analyzer.generate_report(
+                    url=url,
+                    detected_fields=fields,
+                    filled_fields=filled,
+                    skipped_fields=skipped,
+                    execution_time=execution_time,
+                    dry_run=dry_run
+                )
+                analyzer.export_snapshot(
+                    url=url,
+                    detected_fields=fields,
+                    filled_fields=filled,
+                    skipped_fields=skipped,
+                    execution_time=execution_time
+                )
+
+                if not dry_run:
+                    pm.take_screenshot("screenshots/filled_form.png")
+                    print("Screenshot saved...")
+
+                print(report)
+                if not dry_run:
+                    print("Auto-fill completed.")
+                sys.exit(0)
+        except Exception as exc:
+            try:
+                print(f"❌ Error during auto-fill: {exc}", file=sys.stderr)
+            except UnicodeEncodeError:
+                print(f"[ERROR] Error during auto-fill: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+
     parser = _build_parser()
     args = parser.parse_args()
 
