@@ -33,6 +33,7 @@ jobs:
       HH_EMAIL_SENDER: ${{ secrets.HH_EMAIL_SENDER }}
       HH_EMAIL_PASSWORD: ${{ secrets.HH_EMAIL_PASSWORD }}
       HH_EMAIL_RECIPIENTS: ${{ secrets.HH_EMAIL_RECIPIENTS }}
+      HH_APPROVAL_BASE_URL: ${{ secrets.HH_APPROVAL_BASE_URL }}
       HH_LOCATION_FILTER: india
       HH_INCLUDE_ONLINE: 'true'
       HH_PRIORITY_CITY: hyderabad
@@ -56,6 +57,9 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium & dependencies
+        run: python -m playwright install --with-deps chromium
 
       # ──────────────────────────────────────────────────────────
       # 3. Restore database artifact from last successful run
