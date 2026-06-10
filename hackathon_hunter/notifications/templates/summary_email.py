@@ -79,11 +79,16 @@ def render_plain(hackathons: list[Hackathon], analyses: dict[str, dict] = None) 
         # Include readiness report if available
         if analyses and h.url in analyses:
             analysis = analyses[h.url]
-            status = analysis.get("analysis_status", "NOT_ANALYZED")
-            if status == "ANALYZED":
+            status = analysis.get("approval_status", "PENDING")
+            from hackathon_hunter.approval.token_manager import TokenManager
+            if status == "PENDING" and TokenManager.is_expired(analysis.get("token_expires_at")):
+                status = "EXPIRED"
+
+            if analysis.get("analysis_status") == "ANALYZED":
                 lines.append(f"   Automation Score: {analysis.get('automation_score', 0)}")
                 lines.append(f"   Classification  : {analysis.get('classification', 'LOW')}")
                 lines.append(f"   Recommendation  : {analysis.get('automation_recommendation', 'MANUAL_ONLY')}")
+                lines.append(f"   Approval Status : {status}")
                 lines.append("   Fields:")
                 lines.append(f"     Profile  : {analysis.get('profile_field_count', 0)}")
                 lines.append(f"     Questions: {analysis.get('question_field_count', 0)}")
@@ -91,9 +96,17 @@ def render_plain(hackathons: list[Hackathon], analyses: dict[str, dict] = None) 
                 lines.append(f"     Consent  : {analysis.get('consent_field_count', 0)}")
                 lines.append(f"     Unknown  : {analysis.get('unknown_field_count', 0)}")
             else:
-                lines.append(f"   Analysis Status: {status}")
+                lines.append(f"   Automation Status: {status}")
+
+            from hackathon_hunter.config import settings
+            base_url = settings.APPROVAL_BASE_URL.rstrip("/") if settings.APPROVAL_BASE_URL else ""
+            token = analysis.get("approval_token", "")
+            if base_url and token:
+                lines.append(f"   Approve Link   : {base_url}/approve/{token}")
+                lines.append(f"   Reject Link    : {base_url}/reject/{token}")
+                lines.append(f"   Status Link    : {base_url}/api/status/{token}")
         else:
-            lines.append("   Analysis Status: NOT_ANALYZED")
+            lines.append("   Automation Status: NOT_ANALYZED")
 
         lines.append("")
 
@@ -160,9 +173,15 @@ def _render_hackathon_card(h: Hackathon, index: int, analysis: dict[str, Any] | 
         if h.deadline else ""
     )
 
-    # Approval link placeholders — replace href="#..." with real webhook URLs later
-    approve_href = f"#approve-{url_hash}"
-    skip_href = f"#skip-{url_hash}"
+    from hackathon_hunter.config import settings
+    base_url = settings.APPROVAL_BASE_URL.rstrip("/") if settings.APPROVAL_BASE_URL else ""
+    token = analysis.get("approval_token", "") if analysis else ""
+    if base_url and token:
+        approve_href = f"{base_url}/approve/{token}"
+        reject_href = f"{base_url}/reject/{token}"
+    else:
+        approve_href = "#"
+        reject_href = "#"
 
     # Style overrides for Hyderabad priority events
     is_hyd = is_hyderabad_hackathon(h.location)
@@ -256,13 +275,13 @@ def _render_hackathon_card(h: Hackathon, index: int, analysis: dict[str, Any] | 
                   ✅ Approve
                 </a>
               </td>
-              <!-- Skip placeholder -->
+              <!-- Reject placeholder -->
               <td>
-                <a href="{skip_href}"
+                <a href="{reject_href}"
                    style="display:inline-block;background:#E5E7EB;color:#6B7280;
                           font-size:12px;font-weight:600;padding:8px 16px;
                           border-radius:6px;text-decoration:none;">
-                  ⏭ Skip
+                  ❌ Reject
                 </a>
               </td>
             </tr>
@@ -393,8 +412,19 @@ def _get_readiness_html(analysis: dict[str, Any] | None) -> str:
           🤖 Automation Status: <strong>NOT_ANALYZED</strong>
         </div>
         """
-    status = analysis.get("analysis_status", "NOT_ANALYZED")
-    if status == "ANALYZED":
+    status = analysis.get("approval_status", "PENDING")
+    # Check for expiration dynamically
+    from hackathon_hunter.approval.token_manager import TokenManager
+    if status == "PENDING" and TokenManager.is_expired(analysis.get("token_expires_at")):
+        status = "EXPIRED"
+
+    # Resolve links
+    from hackathon_hunter.config import settings
+    base_url = settings.APPROVAL_BASE_URL.rstrip("/") if settings.APPROVAL_BASE_URL else ""
+    token = analysis.get("approval_token", "")
+    status_href = f"{base_url}/api/status/{token}" if base_url and token else "#"
+
+    if status == "ANALYZED" or analysis.get("analysis_status") == "ANALYZED":
         score = analysis.get("automation_score", 0)
         cls = analysis.get("classification", "LOW")
         rec = analysis.get("automation_recommendation", "MANUAL_ONLY")
@@ -428,15 +458,22 @@ def _get_readiness_html(analysis: dict[str, Any] | None) -> str:
               <td style="padding: 2px 0; text-align: right;">{analysis.get("unknown_field_count", 0)}</td>
             </tr>
             <tr>
-              <td style="padding: 6px 0 0 0; font-weight: 600; border-top: 1px dashed #E2E8F0;">Recommended Action</td>
-              <td style="padding: 6px 0 0 0; text-align: right; font-weight: 700; color: {rec_color}; border-top: 1px dashed #E2E8F0;">{rec}</td>
+              <td style="padding: 2px 0; font-weight: 600;">Approval Status</td>
+              <td style="padding: 2px 0; text-align: right; font-weight: 700; color: {rec_color};">{status}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0 0 0; font-weight: 600; border-top: 1px dashed #E2E8F0;">Action Links</td>
+              <td style="padding: 6px 0 0 0; text-align: right; font-weight: 700; border-top: 1px dashed #E2E8F0;">
+                <a href="{status_href}" style="color: #2563EB; text-decoration: none;">🔍 View Status</a>
+              </td>
             </tr>
           </table>
         </div>
         """
     else:
         return f"""
-        <div style="margin-top: 14px; padding: 8px 12px; background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; font-size: 12px; color: #64748B;">
-          🤖 Automation Status: <strong style="color: #DC2626;">{status}</strong>
+        <div style="margin-top: 14px; padding: 8px 12px; background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; font-size: 12px; color: #64748B; display: flex; justify-content: space-between; align-items: center;">
+          <span>🤖 Automation Status: <strong style="color: #DC2626;">{status}</strong></span>
+          <a href="{status_href}" style="color: #2563EB; text-decoration: none; font-weight: 600;">🔍 View Status</a>
         </div>
         """

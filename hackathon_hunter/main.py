@@ -88,6 +88,11 @@ def build_notification_manager(db_path: str) -> Optional[NotificationManager]:
                 "HH_EMAIL_ENABLED=true but HH_EMAIL_RECIPIENTS is empty "
                 "— email notifications disabled."
             )
+        elif not settings.APPROVAL_BASE_URL:
+            logger.error("HH_APPROVAL_BASE_URL is not set while email is enabled.")
+            raise RuntimeError(
+                "Configuration error: HH_APPROVAL_BASE_URL must be supplied through environment variables when HH_EMAIL_ENABLED=true."
+            )
         else:
             notifiers.append(
                 EmailNotifier(

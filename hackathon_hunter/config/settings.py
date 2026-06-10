@@ -78,3 +78,8 @@ PRIORITY_CITY: str = os.getenv("HH_PRIORITY_CITY", "hyderabad").strip().lower()
 # ---------------------------------------------------------------------------
 PAGE_STABILIZATION_DELAY_MS: int = int(os.getenv("HH_PAGE_STABILIZATION_DELAY_MS", "3000"))
 
+# ---------------------------------------------------------------------------
+# Approval Workflow System (Phase 7)
+# ---------------------------------------------------------------------------
+APPROVAL_BASE_URL: str = os.getenv("HH_APPROVAL_BASE_URL", "").strip()
+

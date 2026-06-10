@@ -208,6 +208,53 @@ def main() -> None:
             print(f"Error setting up analysis: {exc}", file=sys.stderr)
             sys.exit(1)
 
+    # Intercept approvals subcommand
+    if len(sys.argv) > 1 and sys.argv[1] == "approvals":
+        if len(sys.argv) < 3 or sys.argv[2] not in ("pending", "approved", "rejected"):
+            print("Usage: python -m hackathon_hunter approvals <pending|approved|rejected>", file=sys.stderr)
+            sys.exit(1)
+
+        status_filter = sys.argv[2].upper()
+
+        try:
+            # Reconfigure stdout/stderr for Unicode
+            try:
+                if hasattr(sys.stdout, "reconfigure"):
+                    sys.stdout.reconfigure(encoding="utf-8")
+                if hasattr(sys.stderr, "reconfigure"):
+                    sys.stderr.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
+
+            from hackathon_hunter.repositories.registration_analysis_repository import RegistrationAnalysisRepository
+            db_path = settings.DATABASE_PATH
+            repo = RegistrationAnalysisRepository(db_path=db_path)
+            repo.initialize()
+
+            records = repo.list_by_status(status_filter)
+
+            print(f"--- {status_filter.title()} Approvals ---")
+            for r in records:
+                print(f"URL: {r['url']}")
+                print(f"Name: {r['hackathon_name'] or 'Unknown Hackathon'}")
+                print(f"Score: {r['automation_score']} ({r['classification']})")
+                print(f"Recommendation: {r['automation_recommendation']}")
+                print(f"Token: {r['approval_token']}")
+                print(f"Created: {r['created_at']}")
+                if r['approved_at']:
+                    print(f"Approved At: {r['approved_at']}")
+                if r['rejected_at']:
+                    print(f"Rejected At: {r['rejected_at']}")
+                if r['approval_notes']:
+                    print(f"Notes: {r['approval_notes']}")
+                print("-" * 40)
+            
+            print(f"Total: {len(records)} {status_filter.lower()} approvals")
+            sys.exit(0)
+        except Exception as exc:
+            print(f"Error listing approvals: {exc}", file=sys.stderr)
+            sys.exit(1)
+
     # Intercept autofill subcommand
     if len(sys.argv) > 1 and sys.argv[1] == "autofill":
         if len(sys.argv) < 3:

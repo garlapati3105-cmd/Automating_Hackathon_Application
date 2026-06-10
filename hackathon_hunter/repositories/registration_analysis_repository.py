@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class RegistrationAnalysisRepository:
     """
-    Manages persistence of hackathon registration readiness analyses.
+    Manages persistence of hackathon registration readiness analyses and approval logs.
     """
 
     def __init__(self, db_path: str = "data/hackathons.db") -> None:
@@ -24,9 +24,10 @@ class RegistrationAnalysisRepository:
         return conn
 
     def initialize(self) -> None:
-        """Create the registration_analysis table if it does not exist."""
+        """Create tables and execute migrations if columns are missing."""
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
+            # Create base table
             conn.execute("""
             CREATE TABLE IF NOT EXISTS registration_analysis (
                 id                     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,8 +49,47 @@ class RegistrationAnalysisRepository:
                 updated_at             TIMESTAMP NOT NULL
             );
             """)
+
+            # Create approval history table
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS approval_history (
+                id         INTEGER   PRIMARY KEY AUTOINCREMENT,
+                token      TEXT      NOT NULL,
+                action     TEXT      NOT NULL,
+                timestamp  TIMESTAMP NOT NULL,
+                notes      TEXT
+            );
+            """)
             conn.commit()
-        logger.debug("registration_analysis table ready at %s", self._db_path)
+
+            # Schema migrations check
+            cursor = conn.execute("PRAGMA table_info(registration_analysis)")
+            columns = [row["name"] for row in cursor.fetchall()]
+
+            new_cols = {
+                "approved_at": "TIMESTAMP",
+                "rejected_at": "TIMESTAMP",
+                "approval_notes": "TEXT",
+                "token_expires_at": "TIMESTAMP"
+            }
+
+            for col_name, col_type in new_cols.items():
+                if col_name not in columns:
+                    logger.info("Migrating registration_analysis table: adding column %s", col_name)
+                    conn.execute(f"ALTER TABLE registration_analysis ADD COLUMN {col_name} {col_type};")
+                    conn.commit()
+
+        logger.debug("registration_analysis and approval_history tables ready at %s", self._db_path)
+
+    def add_history_log(self, token: str, action: str, notes: str | None = None) -> None:
+        """Log an action to approval_history table."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute("""
+            INSERT INTO approval_history (token, action, timestamp, notes)
+            VALUES (?, ?, ?, ?)
+            """, (token, action, now, notes))
+            conn.commit()
 
     def save_placeholder(self, url: str, name: str) -> str:
         """
@@ -58,9 +98,10 @@ class RegistrationAnalysisRepository:
         Returns the generated approval_token.
         """
         now = datetime.now(timezone.utc).isoformat()
-        token = uuid.uuid4().hex
+        from hackathon_hunter.approval.token_manager import TokenManager
+        token, expiration = TokenManager.generate_token()
+
         with self._connect() as conn:
-            # Only insert if it doesn't already exist
             row = conn.execute("SELECT approval_token FROM registration_analysis WHERE url = ?", (url,)).fetchone()
             if row:
                 return row["approval_token"]
@@ -71,9 +112,9 @@ class RegistrationAnalysisRepository:
                 team_field_count, consent_field_count, unknown_field_count,
                 automation_score, requires_human_review, classification,
                 automation_recommendation, approval_status, analysis_status,
-                approval_token, created_at, updated_at
-            ) VALUES (?, ?, 0, 0, 0, 0, 0, 0, 1, 'LOW', 'MANUAL_ONLY', 'PENDING', 'NOT_ANALYZED', ?, ?, ?)
-            """, (url, name, token, now, now))
+                approval_token, token_expires_at, created_at, updated_at
+            ) VALUES (?, ?, 0, 0, 0, 0, 0, 0, 1, 'LOW', 'MANUAL_ONLY', 'PENDING', 'NOT_ANALYZED', ?, ?, ?, ?)
+            """, (url, name, token, expiration, now, now))
             conn.commit()
         return token
 
@@ -97,13 +138,15 @@ class RegistrationAnalysisRepository:
         Returns the approval_token for the row.
         """
         now = datetime.now(timezone.utc).isoformat()
-        token = uuid.uuid4().hex
+        from hackathon_hunter.approval.token_manager import TokenManager
+        token, expiration = TokenManager.generate_token()
+
         with self._connect() as conn:
-            row = conn.execute("SELECT approval_status, approval_token FROM registration_analysis WHERE url = ?", (url,)).fetchone()
+            row = conn.execute("SELECT approval_status, approval_token, token_expires_at FROM registration_analysis WHERE url = ?", (url,)).fetchone()
             if row:
-                # Keep existing approval status & token
                 status = row["approval_status"]
                 ret_token = row["approval_token"]
+                ret_expires = row["token_expires_at"] or expiration
                 conn.execute("""
                 UPDATE registration_analysis
                 SET hackathon_name = ?,
@@ -118,6 +161,7 @@ class RegistrationAnalysisRepository:
                     automation_recommendation = ?,
                     approval_status = ?,
                     analysis_status = 'ANALYZED',
+                    token_expires_at = ?,
                     updated_at = ?
                 WHERE url = ?
                 """, (
@@ -132,6 +176,7 @@ class RegistrationAnalysisRepository:
                     classification,
                     recommendation,
                     status,
+                    ret_expires,
                     now,
                     url,
                 ))
@@ -143,8 +188,8 @@ class RegistrationAnalysisRepository:
                     team_field_count, consent_field_count, unknown_field_count,
                     automation_score, requires_human_review, classification,
                     automation_recommendation, approval_status, analysis_status,
-                    approval_token, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ANALYZED', ?, ?, ?)
+                    approval_token, token_expires_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ANALYZED', ?, ?, ?, ?)
                 """, (
                     url,
                     hackathon_name,
@@ -159,6 +204,7 @@ class RegistrationAnalysisRepository:
                     recommendation,
                     approval_status,
                     ret_token,
+                    expiration,
                     now,
                     now,
                 ))
@@ -171,9 +217,11 @@ class RegistrationAnalysisRepository:
         Returns the approval_token for the row.
         """
         now = datetime.now(timezone.utc).isoformat()
-        token = uuid.uuid4().hex
+        from hackathon_hunter.approval.token_manager import TokenManager
+        token, expiration = TokenManager.generate_token()
+
         with self._connect() as conn:
-            row = conn.execute("SELECT approval_status, approval_token FROM registration_analysis WHERE url = ?", (url,)).fetchone()
+            row = conn.execute("SELECT approval_status, approval_token, token_expires_at FROM registration_analysis WHERE url = ?", (url,)).fetchone()
             if row:
                 ret_token = row["approval_token"]
                 conn.execute("""
@@ -190,9 +238,9 @@ class RegistrationAnalysisRepository:
                     team_field_count, consent_field_count, unknown_field_count,
                     automation_score, requires_human_review, classification,
                     automation_recommendation, approval_status, analysis_status,
-                    approval_token, created_at, updated_at
-                ) VALUES (?, ?, 0, 0, 0, 0, 0, 0, 1, 'LOW', 'MANUAL_ONLY', 'PENDING', 'FAILED', ?, ?, ?)
-                """, (url, hackathon_name or "", ret_token, now, now))
+                    approval_token, token_expires_at, created_at, updated_at
+                ) VALUES (?, ?, 0, 0, 0, 0, 0, 0, 1, 'LOW', 'MANUAL_ONLY', 'PENDING', 'FAILED', ?, ?, ?, ?)
+                """, (url, hackathon_name or "", ret_token, expiration, now, now))
             conn.commit()
         return ret_token
 
@@ -208,15 +256,33 @@ class RegistrationAnalysisRepository:
             conn.commit()
 
     def get_analysis(self, url: str) -> Optional[dict[str, Any]]:
-        """Retrieves analysis record for a URL."""
+        """Retrieves analysis record for a URL. Transitions expired pending analyses."""
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM registration_analysis WHERE url = ?", (url,)).fetchone()
-            if row:
-                return dict(row)
-            return None
+            if not row:
+                return None
+            record = dict(row)
+            
+            # Check and transition status to EXPIRED if applicable
+            if record.get("approval_status") == "PENDING":
+                from hackathon_hunter.approval.token_manager import TokenManager
+                if TokenManager.is_expired(record.get("token_expires_at")):
+                    self.update_status(url, "EXPIRED")
+                    record["approval_status"] = "EXPIRED"
+
+            return record
 
     def list_by_status(self, status: str) -> list[dict[str, Any]]:
-        """Lists all analyses with a specific approval status."""
+        """Lists all analyses with a specific approval status. Forces dynamic expiration checks."""
+        # Force status transition for all PENDING expired rows first
+        if status.upper() == "EXPIRED" or status.upper() == "PENDING":
+            with self._connect() as conn:
+                pending_rows = conn.execute("SELECT url, token_expires_at FROM registration_analysis WHERE approval_status = 'PENDING'").fetchall()
+                from hackathon_hunter.approval.token_manager import TokenManager
+                for row in pending_rows:
+                    if TokenManager.is_expired(row["token_expires_at"]):
+                        self.update_status(row["url"], "EXPIRED")
+
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM registration_analysis WHERE approval_status = ?", (status,)).fetchall()
+            rows = conn.execute("SELECT * FROM registration_analysis WHERE approval_status = ?", (status.upper(),)).fetchall()
             return [dict(r) for r in rows]
